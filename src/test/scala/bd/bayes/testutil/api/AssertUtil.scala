@@ -1,4 +1,4 @@
-package bd.bayes.testutil.fluent
+package bd.bayes.testutil.api
 
 import org.junit._
 import Assert._
