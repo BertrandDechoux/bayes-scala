@@ -4,6 +4,9 @@ import dk.bayes.model.clustergraph.factor.Var
 import dk.bayes.model.clustergraph.factor.Factor
 import dk.bayes.model.clustergraph.ClusterGraph
 
+/**
+ * Provide a DSL for easily building discrete Bayesion network.
+ */
 object DiscreteBayesian {
   type NodeGroup = Int
   
@@ -42,10 +45,13 @@ object DiscreteBayesian {
   }
 
   /** Declare a node for the current network. */
-  def P(n:NodeDeclaration)(implicit network:NetworkBuilder) = network.createParameterlessNode(n)
+  def P(n:NodeDeclaration)(implicit network:NetworkBuilder) = network.createUnparameterizedNode(n)
   def network() = new NetworkBuilder()
 }
 
+/**
+ * A mutable builder tracking the nodes which have been created.
+ */
 class NetworkBuilder {
   import DiscreteBayesian._
   
@@ -53,6 +59,13 @@ class NetworkBuilder {
   private var nextNodeGroup = 1
   private val nodes = scala.collection.mutable.LinkedHashMap[Int, Node]()
   
+  /**
+   * In order to identify multiple clusters (of the cluster graph) with the same id,
+   * the related nodes need to be grouped within the same node group.
+   * 
+   * First step is the creation of that group.
+   * Second step is during the creation of the node.
+   */
   def createNodeGroup(): NodeGroup = {
     val nodeGroup = nextNodeGroup
     nextNodeGroup += 1
@@ -65,33 +78,30 @@ class NetworkBuilder {
     nodeId
   }
   
-  def createParameterlessNode(n:NodeDeclaration) : UnparameterizedNode = {
+  /**
+   * Create a node template which still requires parameters.
+   */
+  def createUnparameterizedNode(n:NodeDeclaration) : UnparameterizedNode = {
     UnparameterizedNode(createNodeId(), n)
   }
   
-  private def register(n:UnparameterizedNode, dimension:Int, parameters:Seq[Double]): Node = {
-    val parents = n.declaration.parents
-    val variable = Var(nextNodeId, dimension)
-    val factor = if (parents.isEmpty) Factor(variable,parameters.toArray) else {
+  private def createFactor(parameters: Seq[Double], parents: Seq[Node], variable: Var): Factor = {
+    if (parents.isEmpty) Factor(variable,parameters.toArray) else {
     	val variables = parents.map(_.variable).toArray :+ variable
     	Factor(variables, parameters.toArray)
     }
-    val node = Node(n.declaration.name, variable, parents.toList, n.group, factor)
-    nodes += (node.id -> node)
-    nextNodeId += 1
-    node
   }
   
-  def registerNode(n:UnparameterizedNode,parameters:Seq[Double]) : Node =  {
-    val parents = n.declaration.parents
-    if (parents.isEmpty) {
-      register(n, parameters.size, parameters)
-    } else {
-    	// path dependent types could allow the compiler to check that 
-	    val undeclaredParents = parents.filter(p => !nodes.contains(p.id))
-	    if (!undeclaredParents.isEmpty) {
-	      throw new IllegalArgumentException(s"Undeclared parents : %s".format(undeclaredParents))
-	    }
+  // XXX path dependent types could allow the compiler to check that 
+  private def verifyParentsRegistration(parents: Seq[Node]): Unit = {
+    val undeclaredParents = parents.filter(p => !nodes.contains(p.id))
+    if (!undeclaredParents.isEmpty) {
+      throw new IllegalArgumentException(s"Undeclared parents : %s".format(undeclaredParents))
+    }
+  }
+  
+  private def findDimension(parameters: Seq[Double], parents: Seq[Node]): Int = {
+    if(parents.isEmpty) parameters.size else {
 	    val parentDimension : Double = parents.map(_.variable.dim).reduce(_*_)
 	    val dimension = parameters.size / parentDimension
 	    if(!dimension.isValidInt) {
@@ -99,10 +109,27 @@ class NetworkBuilder {
 	          "total dimension %d, parent dimension %d, node dimension %d ?"
 	          .format(parameters.size,parentDimension,dimension))
 	    }
-      register(n, dimension.toInt, parameters)
+	    dimension.toInt
     }
   }
+  
+  /**
+   * Register a new node for this network.
+   */
+  def registerNode(n:UnparameterizedNode, parameters:Seq[Double]) : Node =  {
+    val parents = n.declaration.parents
+    verifyParentsRegistration(parents)
+    val variable = Var(n.id, findDimension(parameters, parents))
+    val factor = createFactor(parameters, parents, variable)
+    val node = Node(n.declaration.name, variable, parents.toList, n.group, factor)
+    nodes += (node.id -> node)
+    node
+  }
 
+  /**
+   * Create the cluster graph representing the current Bayesian network.
+   * @see page 152 "Bayesian Networks and Decision Graphs,Second Edition" Jensen Finn V., Nielsen Thomas D.
+   */
   def createClusterGraph(): ClusterGraph = {
     val graph = ClusterGraph()
     nodes.foreach(e => graph.addCluster(e._1, e._2.factor))
@@ -112,4 +139,7 @@ class NetworkBuilder {
     }
     graph
   }
+  
+
+  
 }
