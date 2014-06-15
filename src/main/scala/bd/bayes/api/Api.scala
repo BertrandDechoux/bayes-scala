@@ -32,15 +32,16 @@ object DiscreteBayesian {
   
   /** The full declaration of the node without its parameters. */
   case class UnparameterizedNode(id:Int,declaration:NodeDeclaration,group:Option[NodeGroup]=None) {
-    def follows(parameters:Double*)(implicit network:NetworkBuilder) = network.registerNode(this,parameters)
+    /** Associate the parameters. */
+    def is(parameters:Double*)(implicit network:NetworkBuilder) : Node = network.registerNode(this,parameters)
+    def is(cpt:CPTLike)(implicit network:NetworkBuilder) : Node = is(cpt.asParameters:_*)
+    /** Associate a node group. */
     def in(group:NodeGroup) = copy(group=Some(group))
   }
   
   /** The full declaration of the node with its parameters. */
   case class Node(name: Symbol, variable: Var, parents: List[Node], group: Option[NodeGroup], factor: Factor) {
-	if (variable.dim < 2) {
-      throw new IllegalArgumentException("Dimension must be at least 2")
-    }
+	require(variable.dim >= 2, "Dimension must be at least 2")
 	def id = variable.id
   }
 
@@ -95,20 +96,16 @@ class NetworkBuilder {
   // XXX path dependent types could allow the compiler to check that 
   private def verifyParentsRegistration(parents: Seq[Node]): Unit = {
     val undeclaredParents = parents.filter(p => !nodes.contains(p.id))
-    if (!undeclaredParents.isEmpty) {
-      throw new IllegalArgumentException(s"Undeclared parents : %s".format(undeclaredParents))
-    }
+    require(undeclaredParents.isEmpty, s"Undeclared parents : %s".format(undeclaredParents))
   }
   
   private def findDimension(parameters: Seq[Double], parents: Seq[Node]): Int = {
     if(parents.isEmpty) parameters.size else {
 	    val parentDimension : Double = parents.map(_.variable.dim).reduce(_*_)
 	    val dimension = parameters.size / parentDimension
-	    if(!dimension.isValidInt) {
-	      throw new IllegalArgumentException(s"Parameters error : " +
+	    require(dimension.isValidInt, s"Parameters error : " +
 	          "total dimension %d, parent dimension %d, node dimension %d ?"
 	          .format(parameters.size,parentDimension,dimension))
-	    }
 	    dimension.toInt
     }
   }
